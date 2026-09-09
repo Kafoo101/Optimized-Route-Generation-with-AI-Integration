@@ -114,17 +114,11 @@ app.post("/api/chat", async (req, res) => {
             const call = response.functionCalls ? response.functionCalls[0] : null;
             console.log("Tool Call Event Detected!", call);
 
-            //Execution Logic
             if (call.name === "planTransitRoute") {
-
-                //console.log("DEBUG: Raw Args received from Gemini:", call.args);
-
-                let departureTime = null;
+                let departureTime = call.args.departureTimeStr;
                 if (call.args.departureTimeStr === "NOW") {
                     departureTime = timestamp; // Use the current timestamp if "NOW" is specified
                 }
-                //console.log("DEBUG: Adjusted Departure Time:", departureTime);
-
                 const result = {
                     origin: call.args.origin,
                     destination: call.args.destination,
@@ -133,12 +127,8 @@ app.post("/api/chat", async (req, res) => {
                     maxWalkMinutes: call.args.maxWalkMinutes || 12,
                     delay: call.args.delay || 0
                 };
-
-                //console.log("DEBUG: Routing result:", result);
-
-                return res.json({ actionType: "ROUTE_DATA", data: result }); // to index.js
+                return res.json({ actionType: "ROUTE_DATA", data: result }); 
             }
-
         }
 
         // CASE B: Normal Conversational Text Chat

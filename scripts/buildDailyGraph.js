@@ -57,19 +57,14 @@ function buildAndSaveMemoryIndex() {
 
     timeStamp.lastUpdated = rawData[0].BusDate;
     for (const route of rawData) {
-        
         if (!route.Timetables || route.Timetables.length === 0) continue;
-
         const routeKey = `${route.RouteUID}_${route.SubRouteUID}_${route.Direction}`;
         routeTrips[routeKey] = [];
-
         for (const trip of route.Timetables) {
-            
             if (!trip.StopTimes || trip.StopTimes.length === 0) continue;
-
             const sortedStops = trip.StopTimes.sort((a, b) => a.StopSequence - b.StopSequence);
-
             const schedule = [];
+            
             for (const stop of sortedStops) {
                 const stopUID = stop.StopUID;
                 schedule.push({
@@ -78,18 +73,15 @@ function buildAndSaveMemoryIndex() {
                     arr: timeToMinutes(stop.ArrivalTime), 
                     dep: timeToMinutes(stop.DepartureTime)
                 });
-
                 if (!stopRoutes[stopUID]) stopRoutes[stopUID] = [];
                 if (!stopRoutes[stopUID].includes(routeKey)) {
                     stopRoutes[stopUID].push(routeKey);
                 }
             }
-
             routeTrips[routeKey].push({
                 tripId: trip.TripID,
                 schedule: schedule
             });
-
             if (!routeStops[routeKey]) {
                 routeStops[routeKey] = schedule.map(s => s.stop);
             }

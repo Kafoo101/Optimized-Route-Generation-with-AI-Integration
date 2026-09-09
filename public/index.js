@@ -6,7 +6,6 @@ let raptorIndex;
 let shapeIndex;
 let stopInfo;
 let routeInfo;
-let routeIndex;
 
 // Dedicated layer group to hold all active route drawings (lines, markers, labels)
 // This allows us to clear the map instantly when switching modes
@@ -28,33 +27,51 @@ const redIcon = new L.Icon({
 // --- 1. CORE DATA & UTILITIES ---
 
 async function loadData() {
-    [raptorIndex, shapeIndex, stopInfo, routeInfo, routeIndex] = await Promise.all([
+    [raptorIndex, shapeIndex, stopInfo, routeInfo] = await Promise.all([
         fetch("/processed/raptorIndex.json").then(r => r.json()),
         fetch("/processed/shapeIndex.json").then(r => r.json()),
         fetch("/processed/stopInfo.json").then(r => r.json()),
-        fetch("/processed/routeInfo.json").then(r => r.json()),
-        fetch("/processed/routeIndex.json").then(r => r.json())
+        fetch("/processed/routeInfo.json").then(r => r.json())
     ]);
 }
 
 async function geocode(place) {
-    if(place === "USERCURRENTPOS"){
+    if (place === "USERCURRENTPOS") {
         return getUserLocation();
     }
 
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(place)}&limit=1`;
-    const res = await fetch(url, { headers: { "User-Agent": "MyMapApp/1.0" } });
-    const data = await res.json();
+    // Photon endpoint biased toward Keelung (lat=25.128, lon=121.741)
+    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(place)}&lat=25.128&lon=121.741&limit=1`;
 
-    if (!data || data.length === 0) {
-        console.log(`Location not found: ${place}`);
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!data.features || data.features.length === 0) {
+            console.log(`Location not found: ${place}`);
+            return null;
+        }
+
+        const feature = data.features[0];
+        const props = feature.properties;
+        
+        // CRITICAL: GeoJSON returns coordinates in [longitude, latitude] order
+        const [lng, lat] = feature.geometry.coordinates;
+
+        // Build a user-friendly display name from returned properties
+        const nameParts = [props.name, props.street, props.district || props.city].filter(Boolean);
+        const displayName = nameParts.length > 0 ? nameParts.join(", ") : place;
+
+        return {
+            lat: lat,
+            lng: lng,
+            displayName: displayName
+        };
+
+    } catch (err) {
+        console.error("Photon Geocoding error:", err);
         return null;
     }
-    return {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
-        displayName: data[0].display_name
-    };
 }
 
 async function goToPlace(place) {
@@ -125,13 +142,17 @@ function timeToMinutes(timeStr) {
 }
 
 function getStopName(stopUID) {
-    // Looks up "name_en" from your loaded stopInfo object
     return stopInfo[stopUID]?.name_en || stopUID;
+}
+
+function getBusCode(busUID) {
+    const routeUID = busUID.split('_').slice(0, 2).join('_');
+    return routeInfo[routeUID]?.name_en || routeUID;
 }
 
 function countStops(routeId, boardUID, alightUID) {
     // 1. Get the array of stops directly
-    const stops = routeIndex[routeId];
+    const stops = raptorIndex.routeStops[routeId];
     
     // 2. Safety check: if route doesn't exist, return 0
     if (!stops || !Array.isArray(stops)) {
@@ -157,9 +178,11 @@ function generateRouteSummary(result) {
     const descriptions = legs.map((leg) => {
         const originName = getStopName(leg.boardedAt);
         const destName = getStopName(leg.alightedAt);
+        const boardTime = leg.boardTime;
+        const busCode = getBusCode(leg.route);
         const stopCount = countStops(leg.route, leg.boardedAt, leg.alightedAt);
         
-        return `From ${originName} to ${destName} (${stopCount} stops)`;
+        return `Ride ${busCode} Bus at ${boardTime} from ${originName} to ${destName} (${stopCount} stops)`;
     });
 
     let summary = `I've mapped out your trip. ${descriptions.join(", then ")}. `;
@@ -180,6 +203,38 @@ async function getOSRMRoute(profile, start, end) {
 
 async function getVehicleOSRMRoute(start, end) {
     return getOSRMRoute('driving', start, end);
+}
+
+async function getWalkingValhallaRoute(start, end) {
+    const requestPayload = {
+        locations: [
+            { lat: start.lat, lon: start.lng },
+            { lat: end.lat, lon: end.lng }
+        ],
+        costing: "pedestrian", 
+        units: "kilometers"
+    };
+
+    const url = `https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(requestPayload))}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        // Safety check
+        if (!data.trip || !data.trip.legs || data.trip.legs.length === 0) {
+            console.warn("Valhalla returned no trip legs:", data);
+            return [];
+        }
+
+        const polylineString = data.trip.legs[0].shape;
+        const decodedPoints = polyline.decode(polylineString, 6);
+        return decodedPoints.map(([lat, lng]) => [lng, lat]); 
+
+    } catch (err) {
+        console.error("Valhalla walking route error:", err);
+        return [];
+    }
 }
 
 async function getWalkingOSRMRoute(start, end) {
@@ -205,7 +260,9 @@ async function handleVehicleRouting(startCoords, endCoords) {
 }
 
 async function drawWalkingDotRoute(startCoords, endCoords) {
-    const coords = await getWalkingOSRMRoute(startCoords, endCoords);
+    //const coords = await getWalkingOSRMRoute(startCoords, endCoords);
+    const coords = await getWalkingValhallaRoute(startCoords, endCoords);
+    console.log("walk: ", coords);
     const latlngs = coords.map(c => [c[1], c[0]]);
 
     if (latlngs.length === 0) return;
@@ -479,11 +536,7 @@ function setupChatUI() {
 
             // 3. Render the text reply directly from Gemini
             if (data.actionType === "ROUTE_DATA") {
-                //appendMessage('bot', `Route Data Received: ${JSON.stringify(data.data)}`);
-
-                //console.log("DEBUG: Raw Args received from Gemini:", data.data.transportationMode);
-
-                //add delay to departure time if provided
+                console.log(data.data.departureTimeStr);
                 const baseTimeStr = data.data.departureTimeStr === "NOW" ? time : data.data.departureTimeStr;
                 console.log("DEBUG: Base Departure Time:", baseTimeStr, "Delay:", data.data.delay);
                 const totalMinutes = timeToMinutes(baseTimeStr) + (data.data.delay || 0);
@@ -533,16 +586,6 @@ async function init() {
 
     // Setup initial camera viewpoint anchor
     await goToPlace("National Taiwan Ocean University");
-    
-    // --- TESTING THE MULTIPLEXER ---
-    // Switch between 'private vehicle' and 'bus transit' to see it dynamically clear and rewrite!
-    await smartRoute(
-        "Keelung Railway Station", 
-        "USERCURRENTPOS", 
-        "bus", 
-        "14:50", 
-        20
-    );
 }
 
 document.addEventListener('DOMContentLoaded', init);
