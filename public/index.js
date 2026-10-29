@@ -40,27 +40,31 @@ async function geocode(place) {
         return getUserLocation();
     }
 
-    // Photon endpoint biased toward Keelung (lat=25.128, lon=121.741)
-    const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(place)}&lat=25.128&lon=121.741&limit=1`;
+    // Nominatim endpoint
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(place)}&format=json&limit=1`;
 
     try {
-        const res = await fetch(url);
+        const res = await fetch(url, {
+            headers: {
+                "Accept": "application/json"
+            }
+        });
+
         const data = await res.json();
 
-        if (!data.features || data.features.length === 0) {
+        if (!data || data.length === 0) {
             console.log(`Location not found: ${place}`);
             return null;
         }
 
-        const feature = data.features[0];
-        const props = feature.properties;
-        
-        // CRITICAL: GeoJSON returns coordinates in [longitude, latitude] order
-        const [lng, lat] = feature.geometry.coordinates;
+        const result = data[0];
 
-        // Build a user-friendly display name from returned properties
-        const nameParts = [props.name, props.street, props.district || props.city].filter(Boolean);
-        const displayName = nameParts.length > 0 ? nameParts.join(", ") : place;
+        // Nominatim directly provides latitude and longitude
+        const lat = parseFloat(result.lat);
+        const lng = parseFloat(result.lon);
+
+        // Nominatim provides a display_name directly
+        const displayName = result.display_name || place;
 
         return {
             lat: lat,
@@ -69,7 +73,7 @@ async function geocode(place) {
         };
 
     } catch (err) {
-        console.error("Photon Geocoding error:", err);
+        console.error("Nominatim Geocoding error:", err);
         return null;
     }
 }
@@ -499,12 +503,32 @@ function setupChatUI() {
     const input = document.getElementById('messageInput');
     const sendBtn = document.getElementById('sendBtn');
 
-    function appendMessage(kind, text) {
+    requestAnimationFrame(() => {
+        messages.classList.add('slide-up');
+    });
+
+    function appendMessage(kind, text, animate = false) {
         const el = document.createElement('div');
         el.className = 'message ' + (kind === 'user' ? 'user' : 'bot');
-        el.textContent = text;
         messages.appendChild(el);
         messages.scrollTop = messages.scrollHeight;
+
+        if (animate && kind === 'bot') {
+            let i = 0;
+            const speed = 12; // Fast typewriter tick speed
+            const timer = setInterval(() => {
+                if (i < text.length) {
+                    el.textContent += text.charAt(i);
+                    i++;
+                    messages.scrollTop = messages.scrollHeight;
+                } else {
+                    clearInterval(timer);
+                }
+            }, speed);
+        } else {
+            el.textContent = text;
+            messages.scrollTop = messages.scrollHeight;
+        }
     }
 
     async function sendMessage() {
@@ -519,7 +543,10 @@ function setupChatUI() {
 
         // 1. Render the user's message instantly on-screen
         appendMessage('user', text);
+
         input.value = '';
+        input.style.height = 'auto'; 
+        sendBtn.classList.add('empty');
         input.focus();
 
         try {
@@ -554,24 +581,36 @@ function setupChatUI() {
 
                 if(result) {
                     const humanMessage = generateRouteSummary(result);
-                    appendMessage('bot', humanMessage);
+                    appendMessage('bot', humanMessage, true);
                 }
 
             } else if (data.reply) {
-                appendMessage('bot', data.reply);
+                appendMessage('bot', data.reply, true);
             } else if (data.error) {
-                appendMessage('bot', `System Error: ${data.error}`);
+                appendMessage('bot', `System Error: ${data.error}`, true);
             } else {
-                appendMessage('bot', "I connected to the server, but got an empty response.");
+                appendMessage('bot', "I connected to the server, but got an empty response.", true);
             }
 
         } catch (error) {
             console.error("Chat Pipeline Error:", error);
-            appendMessage('bot', "Couldn't reach the server. Is the backend running?");
+            appendMessage('bot', "Couldn't reach the server. Is the backend running?", true);
         }
     }
 
     sendBtn.addEventListener('click', sendMessage);
+
+    input.addEventListener('input', () => {
+        if (input.value.trim().length > 0) {
+            sendBtn.classList.remove('empty');
+        } else {
+            sendBtn.classList.add('empty');
+        }
+    });
+    if (!input.value.trim()) {
+        sendBtn.classList.add('empty');
+    }
+
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();

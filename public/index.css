@@ -7,15 +7,32 @@ body {
     height: 100vh;
 }
 
-#chat {
-    width: 30%;
-    background: #eee;
-    padding: 10px;
-}
-
 #map {
     width: 70%;
     height: 100vh;
+}
+
+@keyframes slideUpEntrance {
+    0% {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Keyframe for message bubbles popping in */
+@keyframes messageSlideUp {
+    0% {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 #chat {
@@ -26,24 +43,13 @@ body {
     gap: 10px;
     background: #f5f5f5;
     border-right: 1px solid #ccc;
+    height: 100vh;
+    box-sizing: border-box;
 }
 
 #chat input {
     padding: 10px;
     font-size: 14px;
-}
-
-#chat button {
-    padding: 10px;
-    background: #2b6cff;
-    color: white;
-    border: none;
-    cursor: pointer;
-    border-radius: 5px;
-}
-
-#chat button:hover {
-    background: #1f4fd6;
 }
 
 /* Chat styles */
@@ -57,6 +63,14 @@ body {
     background: #fafafa;
     border: 1px solid #e6e6e6;
     border-radius: 6px;
+
+    /* Pre-animation hidden state for slide-up */
+    opacity: 0;
+    transform: translateY(30px);
+}
+
+#messages.slide-up {
+    animation: slideUpEntrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .message {
@@ -64,6 +78,7 @@ body {
     padding: 8px 12px;
     border-radius: 14px;
     font-size: 14px;
+    animation: messageSlideUp 0.25s ease-out forwards; /* Animate new messages when created */
 }
 .message.user {
     align-self: flex-end;
@@ -87,13 +102,65 @@ body {
 #composer textarea {
     flex: 1 1 auto;
     resize: none;
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid #ccc;
+    overflow-y: hidden; /* No scrollbars */
+    min-height: 20px;   /* Initial single-line height */
+    max-height: 120px;  /* Caps height so it doesn't take over the entire screen */
+    padding: 8px 13px;
+    border-radius: 50px;
+    background: #ffffff; 
+    border: 2px solid #d0d5dd;
     font-size: 14px;
+    color: #333333;
+    outline: none;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+#composer textarea:hover,
+#composer textarea:focus {
+    border-color: #77a0ff;
+    box-shadow: 0 0 0 4px rgba(43, 108, 255, 0.15); /* Expanding soft blue glow on the border */
 }
 
 #composer button {
     padding: 8px 12px;
     border-radius: 8px;
+}
+
+#sendBtn.send-btn {
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    width: 11%;
+    height: 11%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#sendBtn circle,
+#sendBtn polygon {
+    transition: fill 0.2s ease, stroke 0.2s ease;
+}
+
+#sendBtn.empty .send-circle {
+    fill: #ffffff;
+    stroke: #d0d5dd;
+    stroke-width: 1.2px;
+}
+#sendBtn.empty .mini-triangle {
+    fill: #ffffff;
+}
+#sendBtn.empty .big-triangle {
+    fill: #9ca3af;
+}
+
+#sendBtn:not(.empty) .send-circle {
+    fill: #2b6cff;
+    stroke: none;
+}
+#sendBtn:not(.empty) .mini-triangle {
+    fill: #2b6cff;
+}
+#sendBtn:not(.empty) .big-triangle {
+    fill: #ffffff;
 }
