@@ -1,4 +1,7 @@
+require("dotenv").config();
 const fs = require("fs");
+const path = require("path");
+const { get } = require("@vercel/blob");
 
 const { verifyRecency, buildAndSaveMemoryIndex } = require("./buildDailyGraph");
 
@@ -10,30 +13,130 @@ let routeStops = {};
 let routeTrips = {}; 
 let stopRoutes = {}; 
 let engineReady = false;
+let lastLoadedAt = 0;
+let initPromise = null;
 
 const MAX_TRANSFERS = 3;
+const INDEX_BLOB_PATH = "raptorIndex.json";
+const INDEX_REFRESH_INTERVAL = 5 * 60 * 1000;
 
 // ==========================================
 // 2. INITIALIZATION (Runs once on startup)
 // ==========================================
-async function initEngine() {
-    const indexPath = "./processed/raptorIndex.json";
 
-    if (!fs.existsSync(indexPath) || !(await verifyRecency())) {
-        buildAndSaveMemoryIndex();
-        console.log("Data update complete")
+
+async function initEngine() {
+    if (initPromise) {
+        return await initPromise;
     }
 
-    console.log("Loading RAPTOR index into memory...");
-    const masterIndex = JSON.parse(fs.readFileSync(indexPath, "utf8"));
-    
-    routeStops = masterIndex.routeStops;
-    routeTrips = masterIndex.routeTrips;
-    stopRoutes = masterIndex.stopRoutes;
-    engineReady = true;
+    initPromise = (async function () {
+        try {
+            console.log("Loading RAPTOR index...");
 
-    console.log("RAPTOR Engine Online. Ready for queries.");
-    return true;
+            let masterIndex;
+
+            if (process.env.BLOB_READ_WRITE_TOKEN) {
+                console.log("Using private Vercel Blob storage...");
+
+                // STEP 1: Retrieve the current manifest.
+                const manifestResult = await get("current.json", {
+                    access: "private",
+                    useCache: false
+                });
+
+                if (
+                    !manifestResult ||
+                    manifestResult.statusCode !== 200 ||
+                    !manifestResult.stream
+                ) {
+                    throw new Error("Could not retrieve current.json manifest.");
+                }
+
+                const manifestText = await new Response(
+                    manifestResult.stream
+                ).text();
+
+                const manifest = JSON.parse(manifestText);
+
+                // STEP 2: Validate the manifest.
+                if (
+                    !manifest ||
+                    typeof manifest.indexPath !== "string" ||
+                    !manifest.indexPath.startsWith("snapshots/") ||
+                    !manifest.indexPath.endsWith("-raptorIndex.json")
+                ) {
+                    throw new Error("Invalid or unsafe RAPTOR manifest.");
+                }
+
+                console.log("Loading snapshot version:", manifest.version);
+
+                // STEP 3: Retrieve the versioned RAPTOR index.
+                const result = await get(manifest.indexPath, {
+                    access: "private",
+                    useCache: false
+                });
+
+                if (!result || result.statusCode !== 200 || !result.stream) {
+                    throw new Error("Could not retrieve RAPTOR snapshot.");
+                }
+
+                const jsonText = await new Response(result.stream).text();
+                masterIndex = JSON.parse(jsonText);
+            }
+            else {
+                console.log("Using local filesystem...");
+
+                const indexPath = path.join(
+                    __dirname,
+                    "..",
+                    "processed",
+                    "raptorIndex.json"
+                );
+
+                if (!fs.existsSync(indexPath) || !(await verifyRecency())) {
+                    buildAndSaveMemoryIndex();
+                    console.log("Local data update complete.");
+                }
+
+                masterIndex = JSON.parse(
+                    fs.readFileSync(indexPath, "utf8")
+                );
+            }
+
+            // STEP 4: Validate the actual RAPTOR index.
+            if (
+                !masterIndex ||
+                !masterIndex.routeStops ||
+                !masterIndex.routeTrips ||
+                !masterIndex.stopRoutes
+            ) {
+                throw new Error("Invalid RAPTOR index structure.");
+            }
+
+            // Replace memory only after successful loading and validation.
+            routeStops = masterIndex.routeStops;
+            routeTrips = masterIndex.routeTrips;
+            stopRoutes = masterIndex.stopRoutes;
+
+            engineReady = true;
+            lastLoadedAt = Date.now();
+
+            console.log("RAPTOR Engine Online.");
+            console.log("Indexed routes:", Object.keys(routeTrips).length);
+
+            return true;
+        }
+        catch (error) {
+            console.error("RAPTOR initialization failed:", error);
+            return engineReady;
+        }
+        finally {
+            initPromise = null;
+        }
+    })();
+
+    return await initPromise;
 }
 
 // ==========================================
@@ -240,11 +343,17 @@ function minutesToTime(minutes) {
 // 5. PUBLIC API (The Wrapper)
 // ==========================================
 async function findRoute(walkableOrigins, destinationStop) {
-    if (!engineReady) {
+    const indexIsStale =
+        Date.now() - lastLoadedAt >= INDEX_REFRESH_INTERVAL;
+
+    if (!engineReady || indexIsStale) {
         const success = await initEngine();
-        if (!success) return { error: "Engine failed to initialize." };
+
+        if (!success) {
+            return { error: "Engine failed to initialize." };
+        }
     }
-    
+
     return runRAPTOR(walkableOrigins, destinationStop);
 }
 

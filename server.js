@@ -6,6 +6,7 @@ const fs = require('fs');
 const turf = require('@turf/turf');
 
 dotenv.config();
+const { updateDailyData } = require("./scripts/updateDailyData");
 const { planDoorToDoorRoute } = require("./scripts/firstMile")
 
 const app = express();
@@ -64,6 +65,45 @@ app.use('/processed', express.static(path.join(__dirname, 'processed')));
 
 app.get('/api/keelung-boundary', (req, res) => {
     res.json(keelungBoundary);
+});
+
+app.get("/api/cron/update-daily-data", async (req, res) => {
+
+    // SECURITY CHECK
+    const cronSecret = process.env.CRON_SECRET;
+
+    if (
+        !cronSecret ||
+        req.headers.authorization !== `Bearer ${cronSecret}`
+    ) {
+        return res.status(401).json({
+            success: false,
+            error: "Unauthorized."
+        });
+    }
+
+    try {
+        console.log("Daily data update triggered.");
+
+        const manifest = await updateDailyData();
+
+        return res.json({
+            success: true,
+            message: "Daily data updated successfully.",
+            version: manifest.version,
+            updatedAt: manifest.updatedAt,
+            recordCount: manifest.recordCount,
+            routeCount: manifest.routeCount
+        });
+
+    } catch (err) {
+        console.error("Cron update failed:", err);
+
+        return res.status(500).json({
+            success: false,
+            error: "Daily data update failed."
+        });
+    }
 });
 
 app.post("/api/route", async (req, res) => {
