@@ -1,8 +1,5 @@
-// ==========================================
-// CONFIG
-// ==========================================
-const CLIENT_ID = "kafoo0aa-6dffb756-774c-4ce0";
-const CLIENT_SECRET = "c597816a-71ab-4434-b9a0-11b56cbd4e68";
+const CLIENT_ID = process.env.TDX_ID;
+const CLIENT_SECRET = process.env.TDX_SECRET;
 
 const AUTH_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token";
 const DAILY_ETA_API = "https://tdx.transportdata.tw/api/basic/v2/Bus/DailyTimeTable/City/Keelung?$format=JSON";

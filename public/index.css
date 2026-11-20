@@ -93,6 +93,11 @@ body {
     border-bottom-left-radius: 4px;
 }
 
+.message.bot p {
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
 #composer {
     display: flex;
     gap: 8px;

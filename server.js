@@ -2,6 +2,8 @@ const express = require('express');
 const { GoogleGenAI } = require('@google/genai');
 const dotenv = require('dotenv');
 const path = require('path');
+const fs = require('fs');
+const turf = require('@turf/turf');
 
 dotenv.config();
 const { planDoorToDoorRoute } = require("./scripts/firstMile")
@@ -9,14 +11,6 @@ const { planDoorToDoorRoute } = require("./scripts/firstMile")
 const app = express();
 const PORT = 3000;
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-//Better GPS string handling
-/*
-function parseGps(gpsString) {
-    if (gpsString === "USERCURRENTPOS") return null; // Handle this in your engine or logic
-    const [lat, lon] = gpsString.split(",").map(Number);
-    return { lat, lon };
-}*/
 
 //Tools definitions
 const smartRouteTool = {
@@ -55,10 +49,22 @@ const smartRouteTool = {
     }
 };
 
+// load Keelung boundaries
+const keelungBoundary = JSON.parse(
+    fs.readFileSync(
+        path.join(__dirname, 'processed', 'keelung-boundary.geojson'),
+        'utf8'
+    )
+);
+
 // serve frontend files
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/processed', express.static(path.join(__dirname, 'processed')));
+
+app.get('/api/keelung-boundary', (req, res) => {
+    res.json(keelungBoundary);
+});
 
 app.post("/api/route", async (req, res) => {
     try {
@@ -95,6 +101,7 @@ app.post("/api/chat", async (req, res) => {
                 Keep your range of search on the map in Taiwan only. 
                 Whenever a user asks for directions, routing help, or how to get somewhere, you MUST execute the planTransitRoute tool. 
                 Do not try to write text coordinates manually. 
+                Do not give long responses, always answer concisely.
                 While calling planTransitRoute tool, you MUST obey the rules as in description. 
                 For example, if the user did not give you their origin, fill in 'USERCURRENTPOS' as the origin. 
                 If the user did not give you a departure time, fill in 'NOW'. 
@@ -146,6 +153,10 @@ app.post("/api/chat", async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+    app.listen(process.env.PORT || PORT, () => {
+        console.log(`Server running at http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;

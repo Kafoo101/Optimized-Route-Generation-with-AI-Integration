@@ -6,6 +6,7 @@ let raptorIndex;
 let shapeIndex;
 let stopInfo;
 let routeInfo;
+let keelungBoundary;
 
 // Dedicated layer group to hold all active route drawings (lines, markers, labels)
 // This allows us to clear the map instantly when switching modes
@@ -27,11 +28,17 @@ const redIcon = new L.Icon({
 // --- 1. CORE DATA & UTILITIES ---
 
 async function loadData() {
-    [raptorIndex, shapeIndex, stopInfo, routeInfo] = await Promise.all([
+    [raptorIndex, shapeIndex, stopInfo, routeInfo, keelungBoundary] = await Promise.all([
         fetch("/processed/raptorIndex.json").then(r => r.json()),
         fetch("/processed/shapeIndex.json").then(r => r.json()),
         fetch("/processed/stopInfo.json").then(r => r.json()),
-        fetch("/processed/routeInfo.json").then(r => r.json())
+        fetch("/processed/routeInfo.json").then(r => r.json()),
+        fetch("/api/keelung-boundary").then(r => {
+            if (!r.ok) {
+                throw new Error("Failed to load Keelung boundary.");
+            }
+            return r.json();
+        })
     ]);
 }
 
@@ -78,10 +85,29 @@ async function geocode(place) {
     }
 }
 
-async function goToPlace(place) {
-    const result = await geocode(place);
-    if (!result) return;
-    map.setView([result.lat, result.lng], 16);
+async function centerMapOnUserLocation() {
+    try {
+        const location = await getUserLocation();
+        map.setView(
+            [location.lat, location.lng],
+            14
+        );
+    } catch (error) {
+        // default to NTOU
+        map.setView([25.1500, 121.7750], 14);
+    }
+}
+
+function isInsideKeelung(coords) {
+    const point = turf.point([coords.lng, coords.lat]);
+
+    if (keelungBoundary.type === "FeatureCollection") {
+        return keelungBoundary.features.some(feature =>
+            turf.booleanPointInPolygon(point, feature)
+        );
+    }
+
+    return turf.booleanPointInPolygon(point, keelungBoundary);
 }
 
 function findClosestVertexIndex(polylinePoints, targetLat, targetLng) {
@@ -464,7 +490,29 @@ async function smartRoute(origin, destination, transportationMode, departureTime
             return;
         }
 
-        // 3. Branching execution path based on mode selection
+        // 3. Validate geographical boundaries for bus routing
+        if (transportationMode === 'bus') {
+            const originInside = isInsideKeelung(startCoords);
+            const destinationInside = isInsideKeelung(endCoords);
+
+            if (!originInside || !destinationInside) {
+
+                let outsideLocations = [];
+
+                if (!originInside) outsideLocations.push("starting location");
+                if (!destinationInside) outsideLocations.push("destination");
+
+                console.log("Route rejected: Location outside Keelung.");
+
+                await centerMapOnUserLocation();
+                return {
+                    boundaryError: true,
+                    message: `Sorry! Our bus routing service currently only supports locations within Keelung City. Your ${outsideLocations.join(" and ")} appears to be outside our supported area. Please choose another location within Keelung!`
+                };
+            }
+        }
+
+        // 4. Branching execution path based on mode selection
         let result = null;
 
         if (transportationMode === 'vehicle') {
@@ -476,7 +524,7 @@ async function smartRoute(origin, destination, transportationMode, departureTime
             return;
         }
 
-        // 4. Dynamic Camera Fitting: Bound perfectly around whatever shapes were generated
+        // 5. Dynamic Camera Fitting: Bound perfectly around whatever shapes were generated
         const activeLayers = currentRouteLayer.getLayers();
         if (activeLayers.length > 0) {
             map.fitBounds(currentRouteLayer.getBounds(), { padding: [30, 30] });
@@ -510,25 +558,35 @@ function setupChatUI() {
     function appendMessage(kind, text, animate = false) {
         const el = document.createElement('div');
         el.className = 'message ' + (kind === 'user' ? 'user' : 'bot');
+
         messages.appendChild(el);
         messages.scrollTop = messages.scrollHeight;
 
         if (animate && kind === 'bot') {
             let i = 0;
-            const speed = 12; // Fast typewriter tick speed
+            const speed = 12;
+
             const timer = setInterval(() => {
                 if (i < text.length) {
-                    el.textContent += text.charAt(i);
                     i++;
+                    el.innerHTML = DOMPurify.sanitize(
+                        marked.parse(text.substring(0, i))
+                    );
                     messages.scrollTop = messages.scrollHeight;
                 } else {
                     clearInterval(timer);
+                    el.innerHTML = DOMPurify.sanitize(
+                        marked.parse(text)
+                    );
                 }
             }, speed);
+
+        } else if (kind === 'bot') {
+            el.innerHTML = DOMPurify.sanitize(marked.parse(text));
         } else {
             el.textContent = text;
-            messages.scrollTop = messages.scrollHeight;
         }
+        messages.scrollTop = messages.scrollHeight;
     }
 
     async function sendMessage() {
@@ -580,8 +638,13 @@ function setupChatUI() {
                 //console.log("DEBUG: Result from smartRoute:", result);
 
                 if(result) {
-                    const humanMessage = generateRouteSummary(result);
-                    appendMessage('bot', humanMessage, true);
+                    if (result.boundaryError){
+                        appendMessage('bot', result.message, true);
+                    }
+                    else{
+                        const humanMessage = generateRouteSummary(result);
+                        appendMessage('bot', humanMessage, true);
+                    }
                 }
 
             } else if (data.reply) {
@@ -597,6 +660,8 @@ function setupChatUI() {
             appendMessage('bot', "Couldn't reach the server. Is the backend running?", true);
         }
     }
+
+    appendMessage('bot',"Hello! How may I help you today?",true);
 
     sendBtn.addEventListener('click', sendMessage);
 
@@ -624,7 +689,7 @@ async function init() {
     setupChatUI();
 
     // Setup initial camera viewpoint anchor
-    await goToPlace("National Taiwan Ocean University");
+    await centerMapOnUserLocation();
 }
 
 document.addEventListener('DOMContentLoaded', init);
