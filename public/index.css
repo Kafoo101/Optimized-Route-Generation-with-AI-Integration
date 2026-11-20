@@ -169,3 +169,71 @@ body {
 #sendBtn:not(.empty) .big-triangle {
     fill: #ffffff;
 }
+
+
+/* General layout improvements */
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+#container {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+}
+
+#map {
+    min-width: 0;
+    min-height: 0;
+}
+
+#chat {
+    min-width: 0;
+    min-height: 0;
+}
+
+#messages {
+    min-height: 0;
+}
+
+/* Mobile portrait layout */
+@media screen and (max-width: 768px) {
+    #container {
+        flex-direction: column;
+    }
+
+    #chat {
+        width: 100%;
+        height: 55%;
+        flex: 0 0 55%;
+        padding: 12px;
+        border-right: none;
+        border-bottom: 1px solid #ccc;
+    }
+
+    #map {
+        width: 100%;
+        height: 45%;
+        flex: 0 0 45%;
+    }
+
+    #chat h3 {
+        margin-top: 4px;
+        margin-bottom: 4px;
+    }
+
+    #sendBtn.send-btn {
+        width: 40px;
+        height: 40px;
+        flex-shrink: 0;
+    }
+
+    #sendBtn svg {
+        width: 100%;
+        height: 100%;
+    }
+}
