@@ -203,7 +203,7 @@ body {
 /* Mobile portrait layout */
 @media screen and (max-width: 768px) {
     #container {
-        flex-direction: column;
+        flex-direction: column-reverse;
     }
 
     #chat {
